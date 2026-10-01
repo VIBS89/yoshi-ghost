@@ -1,11 +1,11 @@
 {
   "physics": {
-    "gravity": 800,
-    "jumpVelocity": -300
+    "gravity": 1200,
+    "jumpVelocity": -450
   },
   "wall": {
-    "speed": 120,
-    "gapSize": 140,
-    "spacing": 350
+    "speed": 180,
+    "gapSize": 210,
+    "spacing": 525
   }
 }

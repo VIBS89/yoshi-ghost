@@ -22,36 +22,44 @@
       display: block;
       border: 2px solid #1a252f;
       border-radius: 4px;
+      /* Internal resolution stays 720x960 for crisp sprites; this just fits
+         the rendered size to the viewport on shorter screens. */
+      max-width: 95vw;
+      max-height: 95vh;
+      width: auto;
+      height: auto;
     }
   </style>
 </head>
 <body>
-  <canvas id="gameCanvas" width="480" height="640"></canvas>
+  <canvas id="gameCanvas" width="720" height="960"></canvas>
   <script>
     // === CONFIG ===
+    // All pixel/speed values are scaled 1.5x from the original 480x640 layout
+    // so characters and world elements read clearly at a larger canvas size.
     const CONFIG = {
-      canvas: { width: 480, height: 640 },
-      gravity: 800,
-      jumpVelocity: -300,
+      canvas: { width: 720, height: 960 },
+      gravity: 1200,
+      jumpVelocity: -450,
       pipe: {
-        speed: 120,
-        gap: 140,
-        width: 52,
-        interval: 90,
+        speed: 180,
+        gap: 210,
+        width: 78,
+        interval: 135,
         bodyColor: '#4CAF50',
         highlightColor: '#66BB6A',
         capColor: '#388E3C',
         outlineColor: '#2E7D32',
-        capHeight: 24,
-        capOverhang: 4
+        capHeight: 36,
+        capOverhang: 6
       },
-      ground: { height: 80 },
+      ground: { height: 120 },
       kiro: {
-        x: 80,
-        width: 40,
-        height: 40,
-        hitboxInset: 2,
-        maxFallSpeed: 600
+        x: 120,
+        width: 60,
+        height: 60,
+        hitboxInset: 3,
+        maxFallSpeed: 900
       },
       cloud: {
         count: 6,
@@ -61,20 +69,20 @@
         maxSpeed: 1.5
       },
       wall: {
-        speed: 120,
-        gapSize: 140,
-        spacing: 350
+        speed: 180,
+        gapSize: 210,
+        spacing: 525
       },
       difficulty: {
-        speedIncrement: 2,
-        maxSpeed: 200,
-        minGap: 100,
-        gapShrinkRate: 1,
+        speedIncrement: 3,
+        maxSpeed: 300,
+        minGap: 150,
+        gapShrinkRate: 1.5,
         gapShrinkStart: 10
       },
       shake: {
         duration: 0.3,
-        intensity: 6
+        intensity: 9
       },
       impossible: {
         duration: 10,
@@ -89,7 +97,81 @@
         beamDuration: 0.3,
         beamColor: '#FF1744',
         beamGlow: '#FF8A80',
-        holeSize: 60
+        holeSize: 90
+      },
+      powerup: {
+        width: 48,
+        height: 48,
+        spawnDistance: 900,
+        duration: 6,
+        bobSpeed: 2.5,
+        amplitude: 25,
+        hitboxInset: 4
+      },
+      yoshi: {
+        bodyColor: '#4CAF50',
+        bodyShadow: '#388E3C',
+        bellyColor: '#DCEDC8',
+        costumeColor: '#FAFAFA',
+        costumeShadow: '#E0E0E0',
+        eyeHoleColor: '#1a1a2e',
+        shoeColor: '#E53935',
+        shoeShadow: '#B71C1C'
+      },
+      world: {
+        switchScore: 12
+      },
+      theme: {
+        ghost: {
+          skyTop: '#4B3F72',
+          skyBottom: '#241E38',
+          groundColor: '#1f1b2e',
+          groundLine: '#120f1d',
+          pipeBody: '#78909C',
+          pipeHighlight: '#90A4AE',
+          pipeCap: '#546E7A',
+          pipeOutline: '#37474F',
+          cloudColor: '#E6E0F8',
+          enemyColor: '#B39DDB',
+          enemyAccent: '#4527A0',
+          label: 'GHOST MANOR'
+        },
+        island: {
+          skyTop: '#8EE9FF',
+          skyBottom: '#D4F8E8',
+          groundColor: '#558B2F',
+          groundLine: '#33691E',
+          pipeBody: '#FDD835',
+          pipeHighlight: '#FFEE58',
+          pipeCap: '#F57F17',
+          pipeOutline: '#E65100',
+          cloudColor: '#ffffff',
+          hillColor: '#7CB342',
+          hillColorDark: '#689F38',
+          enemyColor: '#FF8A65',
+          enemyAccent: '#BF360C',
+          label: 'YOSHI ISLAND'
+        }
+      },
+      enemy: {
+        width: 51,
+        height: 42,
+        spawnDistance: 450,
+        amplitude: 53,
+        bobSpeed: 2.2,
+        // The enemy sprite art has a lot of transparent padding/glow around the
+        // actual character, so the hitbox is a fraction of the sprite box
+        // (centered) rather than a small fixed-pixel inset.
+        hitboxScale: 0.55
+      },
+      fireball: {
+        speed: 630,
+        size: 21,
+        cooldown: 0.35,
+        color: '#FF7043',
+        coreColor: '#FFEE58',
+        outlineColor: '#D84315',
+        defeatEffectDuration: 0.35
       }
     };
     window.CONFIG = CONFIG;
@@ -104,18 +186,9 @@
 
     // === ASSET PRELOADING ===
     const assets = {
-      kiroImg: null,
       jumpSound: null,
-      gameOverSound: null
-    };
-
-    const kiroImg = new Image();
-    kiroImg.src = 'assets/ghosty.png';
-    kiroImg.onload = function() {
-      assets.kiroImg = kiroImg;
-    };
-    kiroImg.onerror = function() {
-      assets.kiroImg = null;
+      yoshiStartSound: null,
+      yoshiDeathSound: null
     };
 
     const jumpSound = new Audio('assets/jump.wav');
@@ -127,14 +200,57 @@
       assets.jumpSound = null;
     };
 
-    const gameOverSound = new Audio('assets/game_over.wav');
-    gameOverSound.preload = 'auto';
-    gameOverSound.oncanplaythrough = function() {
-      assets.gameOverSound = gameOverSound;
+    const yoshiStartSound = new Audio('assets/yoshi_start.wav');
+    yoshiStartSound.preload = 'auto';
+    yoshiStartSound.oncanplaythrough = function() {
+      assets.yoshiStartSound = yoshiStartSound;
     };
-    gameOverSound.onerror = function() {
-      assets.gameOverSound = null;
+    yoshiStartSound.onerror = function() {
+      assets.yoshiStartSound = null;
     };
+
+    const yoshiDeathSound = new Audio('assets/yoshi_death.wav');
+    yoshiDeathSound.preload = 'auto';
+    yoshiDeathSound.oncanplaythrough = function() {
+      assets.yoshiDeathSound = yoshiDeathSound;
+    };
+    yoshiDeathSound.onerror = function() {
+      assets.yoshiDeathSound = null;
+    };
+
+    // === SPRITE PRELOADING ===
+    // Sprites populate `sprites[key]` on success and stay absent on failure/while
+    // loading, so `spriteReady` doubles as the fallback-to-procedural-drawing check.
+    const sprites = {};
+    function loadSprite(key, src) {
+      var img = new Image();
+      img.onload = function() { sprites[key] = img; };
+      img.onerror = function() { sprites[key] = null; };
+      img.src = src;
+    }
+    function spriteReady(key) {
+      return !!sprites[key];
+    }
+    loadSprite('yoshiGhost', 'assets/sprites/yoshi-ghost.png');
+    loadSprite('enemyGhost', 'assets/sprites/enemy-ghost-manor.png');
+    loadSprite('enemyIsland', 'assets/sprites/enemy-yoshi-island.png');
+    loadSprite('fireball', 'assets/sprites/fireball.png');
+    loadSprite('cloudGhost', 'assets/sprites/cloud-ghost.png');
+    loadSprite('cloudIsland', 'assets/sprites/cloud-island.png');
+    loadSprite('hillIsland', 'assets/sprites/hill-island.png');
+    loadSprite('manorGhost', 'assets/sprites/manor-ghost.png');
+    loadSprite('pipeGhost', 'assets/sprites/pipe-ghost.png');
+    loadSprite('pipeIsland', 'assets/sprites/pipe-island.png');
+    loadSprite('ghostMushroom', 'assets/sprites/ghost-mushroom.png');
+
+    const pipePatternCache = {};
+    function getPipePattern(ctx, key) {
+      if (!spriteReady(key)) return null;
+      if (!pipePatternCache[key]) {
+        pipePatternCache[key] = ctx.createPattern(sprites[key], 'repeat');
+      }
+      return pipePatternCache[key];
+    }
 
     // === UTILITY FUNCTIONS ===
     function lerp(a, b, t) {
@@ -175,8 +291,8 @@
         clouds.push({
           x: Math.random() * CONFIG.canvas.width,
           y: Math.random() * (CONFIG.canvas.height - CONFIG.ground.height) * 0.6,
-          width: 60 + Math.random() * 80,
-          height: 25 + Math.random() * 25,
+          width: 90 + Math.random() * 120,
+          height: 38 + Math.random() * 38,
           opacity: opacity,
           speed: speed
         });
@@ -212,7 +328,19 @@
       laserRechargeTimer: 0,
       laserReady: true,
       laserBeamTimer: 0,
-      laserBeamY: 0
+      laserBeamY: 0,
+      world: 'ghost',
+      elapsed: 0,
+      enemies: [],
+      distanceSinceLastEnemy: 0,
+      fireballs: [],
+      fireballCooldown: 0,
+      defeatEffects: [],
+      worldTransitionTimer: 0,
+      worldTransitionText: '',
+      powerups: [],
+      distanceSinceLastPowerup: 0,
+      ghostPhaseTimer: 0
     };
 
     // === PHYSICS ENGINE ===
@@ -237,7 +365,7 @@
 
     // === PIPE MANAGER ===
     function spawnPipe() {
-      var margin = 40;
+      var margin = 60;
       var gapSize = CONFIG.pipe.gap;
       var minGapY = gapSize / 2 + margin;
       var maxGapY = CONFIG.canvas.height - CONFIG.ground.height - gapSize / 2 - margin;
@@ -273,7 +401,7 @@
 
     // === GATE SYSTEM (Impossible Mode) ===
     function spawnGate() {
-      var margin = 40;
+      var margin = 60;
       var gapSize = CONFIG.pipe.gap;
       var minGapY = gapSize / 2 + margin;
       var maxGapY = CONFIG.canvas.height - CONFIG.ground.height - gapSize / 2 - margin;
@@ -305,6 +433,180 @@
         }
       }
       return false;
+    }
+
+    function hasPendingGate(gates) {
+      for (var i = 0; i < gates.length; i++) {
+        if (!gates[i].passed) return true;
+      }
+      return false;
+    }
+
+    // === WORLD SYSTEM ===
+    function worldForScore(score) {
+      var idx = Math.floor(score / CONFIG.world.switchScore) % 2;
+      return idx === 0 ? 'ghost' : 'island';
+    }
+
+    function getWorldTheme(world) {
+      return CONFIG.theme[world];
+    }
+
+    // === ENEMY SYSTEM ===
+    function spawnEnemy() {
+      var cfg = CONFIG.enemy;
+      var margin = 75;
+      var minY = margin;
+      var maxY = CONFIG.canvas.height - CONFIG.ground.height - cfg.height - margin;
+      var baseY = minY + Math.random() * (maxY - minY);
+      return {
+        x: CONFIG.canvas.width,
+        y: baseY,
+        baseY: baseY,
+        width: cfg.width,
+        height: cfg.height,
+        phase: Math.random() * Math.PI * 2
+      };
+    }
+
+    function updateEnemies(enemies, dt, elapsed) {
+      var cfg = CONFIG.enemy;
+      for (var i = enemies.length - 1; i >= 0; i--) {
+        var e = enemies[i];
+        e.x -= CONFIG.pipe.speed * dt;
+        e.y = e.baseY + Math.sin(elapsed * cfg.bobSpeed + e.phase) * cfg.amplitude;
+        if (e.x + e.width < 0) {
+          enemies.splice(i, 1);
+        }
+      }
+    }
+
+    function checkEnemyCollision(kiro, enemies) {
+      var inset = CONFIG.kiro.hitboxInset;
+      var kx = kiro.x + inset;
+      var ky = kiro.y + inset;
+      var kw = kiro.width - 2 * inset;
+      var kh = kiro.height - 2 * inset;
+      var scale = CONFIG.enemy.hitboxScale;
+      for (var i = 0; i < enemies.length; i++) {
+        var e = enemies[i];
+        var eix = e.width * (1 - scale) / 2;
+        var eiy = e.height * (1 - scale) / 2;
+        var ex = e.x + eix;
+        var ey = e.y + eiy;
+        var ew = e.width - 2 * eix;
+        var eh = e.height - 2 * eiy;
+        if (kx < ex + ew && kx + kw > ex && ky < ey + eh && ky + kh > ey) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // === POWERUP SYSTEM (Ghost Mushroom - wall phasing) ===
+    function spawnPowerup() {
+      var cfg = CONFIG.powerup;
+      var margin = 75;
+      var minY = margin;
+      var maxY = CONFIG.canvas.height - CONFIG.ground.height - cfg.height - margin;
+      var baseY = minY + Math.random() * (maxY - minY);
+      return {
+        x: CONFIG.canvas.width,
+        y: baseY,
+        baseY: baseY,
+        width: cfg.width,
+        height: cfg.height,
+        phase: Math.random() * Math.PI * 2
+      };
+    }
+
+    function updatePowerups(powerups, dt, elapsed) {
+      var cfg = CONFIG.powerup;
+      for (var i = powerups.length - 1; i >= 0; i--) {
+        var p = powerups[i];
+        p.x -= CONFIG.pipe.speed * dt;
+        p.y = p.baseY + Math.sin(elapsed * cfg.bobSpeed + p.phase) * cfg.amplitude;
+        if (p.x + p.width < 0) {
+          powerups.splice(i, 1);
+        }
+      }
+    }
+
+    function checkPowerupCollision(kiro, powerups) {
+      var inset = CONFIG.kiro.hitboxInset;
+      var kx = kiro.x + inset;
+      var ky = kiro.y + inset;
+      var kw = kiro.width - 2 * inset;
+      var kh = kiro.height - 2 * inset;
+      var pi = CONFIG.powerup.hitboxInset;
+      for (var i = 0; i < powerups.length; i++) {
+        var p = powerups[i];
+        var px = p.x + pi;
+        var py = p.y + pi;
+        var pw = p.width - 2 * pi;
+        var ph = p.height - 2 * pi;
+        if (kx < px + pw && kx + kw > px && ky < py + ph && ky + kh > py) {
+          return i;
+        }
+      }
+      return -1;
+    }
+
+    // === FIREBALL SYSTEM ===
+    function fireFireball(state) {
+      if (state.status !== 'playing' || state.fireballCooldown > 0) return;
+      state.fireballCooldown = CONFIG.fireball.cooldown;
+      state.fireballs.push({
+        x: state.kiro.x + state.kiro.width,
+        y: state.kiro.y + state.kiro.height * 0.45,
+        vx: CONFIG.fireball.speed
+      });
+    }
+
+    function updateFireballs(fireballs, dt) {
+      for (var i = fireballs.length - 1; i >= 0; i--) {
+        fireballs[i].x += fireballs[i].vx * dt;
+        if (fireballs[i].x > CONFIG.canvas.width + 20) {
+          fireballs.splice(i, 1);
+        }
+      }
+    }
+
+    function updateFireballCollisions(state) {
+      var fireballs = state.fireballs;
+      var enemies = state.enemies;
+      var size = CONFIG.fireball.size;
+      for (var i = fireballs.length - 1; i >= 0; i--) {
+        var fb = fireballs[i];
+        var fx = fb.x - size / 2;
+        var fy = fb.y - size / 2;
+        var hit = false;
+        for (var j = enemies.length - 1; j >= 0; j--) {
+          var e = enemies[j];
+          if (fx < e.x + e.width && fx + size > e.x && fy < e.y + e.height && fy + size > e.y) {
+            state.defeatEffects.push({
+              x: e.x + e.width / 2,
+              y: e.y + e.height / 2,
+              timer: CONFIG.fireball.defeatEffectDuration
+            });
+            enemies.splice(j, 1);
+            hit = true;
+            state.score += 1;
+            state.highScore = updateHighScore(state.score, state.highScore);
+            state.scoreText = formatScore(state.score, state.highScore);
+            state.scoreAnimTimer = 1.0;
+            break;
+          }
+        }
+        if (hit) fireballs.splice(i, 1);
+      }
+    }
+
+    function updateDefeatEffects(effects, dt) {
+      for (var i = effects.length - 1; i >= 0; i--) {
+        effects[i].timer -= dt;
+        if (effects[i].timer <= 0) effects.splice(i, 1);
+      }
     }
 
     // === LASER SYSTEM ===
@@ -360,7 +662,7 @@
     }
 
     // === COLLISION DETECTOR ===
-    function checkCollision(kiro, pipes, gates) {
+    function checkCollision(kiro, pipes, gates, phasing) {
       var inset = CONFIG.kiro.hitboxInset;
       var kx = kiro.x + inset;
       var ky = kiro.y + inset;
@@ -373,6 +675,9 @@
 
       // Ceiling collision (relevant during reversed gravity)
       if (ky <= 0) return false; // clamped, not a death
+
+      // Ghost Mushroom phasing: pass through pipes/gates, ground still solid
+      if (phasing) return false;
 
       var canvasH = CONFIG.canvas.height;
       var groundH = CONFIG.ground.height;
@@ -433,7 +738,7 @@
         var cloud = clouds[i];
         cloud.x -= cloud.speed * dt;
         if (cloud.x + cloud.width < 0) {
-          cloud.x = CONFIG.canvas.width + Math.random() * 100;
+          cloud.x = CONFIG.canvas.width + Math.random() * 150;
           cloud.y = Math.random() * (CONFIG.canvas.height - CONFIG.ground.height) * 0.6;
         }
       }
@@ -460,6 +765,213 @@
       state.laserReady = true;
       state.laserBeamTimer = 0;
       state.laserBeamY = 0;
+      state.world = 'ghost';
+      state.elapsed = 0;
+      state.enemies.length = 0;
+      state.distanceSinceLastEnemy = 0;
+      state.fireballs.length = 0;
+      state.fireballCooldown = 0;
+      state.defeatEffects.length = 0;
+      state.worldTransitionTimer = 0;
+      state.worldTransitionText = '';
+      state.powerups.length = 0;
+      state.distanceSinceLastPowerup = 0;
+      state.ghostPhaseTimer = 0;
+    }
+
+    // === YOSHI GHOST SPRITE (procedural) ===
+    function drawYoshiGhost(ctx, w, h) {
+      var y = CONFIG.yoshi;
+      var halfW = w / 2;
+      var halfH = h / 2;
+      var cx = 0;
+      var cy = -halfH * 0.05;
+      var bodyRX = halfW * 0.95;
+      var bodyRY = halfH * 0.78;
+
+      // Shoes (peek out below the hem)
+      ctx.fillStyle = y.shoeColor;
+      ctx.beginPath();
+      ctx.ellipse(-bodyRX * 0.4, halfH * 0.88, bodyRX * 0.3, halfH * 0.2, 0, 0, Math.PI * 2);
+      ctx.ellipse(bodyRX * 0.25, halfH * 0.9, bodyRX * 0.3, halfH * 0.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Spiky back peeking above the hood
+      ctx.fillStyle = y.bodyColor;
+      ctx.beginPath();
+      ctx.moveTo(-bodyRX * 0.45, cy - bodyRY * 0.7);
+      ctx.lineTo(-bodyRX * 0.25, cy - bodyRY * 1.35);
+      ctx.lineTo(-bodyRX * 0.05, cy - bodyRY * 0.65);
+      ctx.closePath();
+      ctx.fill();
+
+      // Ghost sheet body
+      ctx.fillStyle = y.costumeColor;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, bodyRX, bodyRY, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Scalloped hem (3 lobes)
+      var bumpY = cy + bodyRY * 0.72;
+      var bumpR = bodyRX * 0.34;
+      ctx.beginPath();
+      ctx.arc(-bodyRX * 0.5, bumpY, bumpR, 0, Math.PI * 2);
+      ctx.arc(0, bumpY, bumpR, 0, Math.PI * 2);
+      ctx.arc(bodyRX * 0.5, bumpY, bumpR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = y.costumeShadow;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Snout poking out of the hood (facing right)
+      ctx.fillStyle = y.bodyColor;
+      ctx.beginPath();
+      ctx.ellipse(bodyRX * 0.72, cy + bodyRY * 0.1, bodyRX * 0.4, bodyRY * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = y.bellyColor;
+      ctx.beginPath();
+      ctx.ellipse(bodyRX * 0.92, cy + bodyRY * 0.12, bodyRX * 0.16, bodyRY * 0.14, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = y.bodyShadow;
+      ctx.beginPath();
+      ctx.arc(bodyRX * 0.98, cy, 1.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eye holes
+      ctx.fillStyle = y.eyeHoleColor;
+      ctx.beginPath();
+      ctx.ellipse(-bodyRX * 0.2, cy - bodyRY * 0.2, bodyRX * 0.14, bodyRY * 0.2, 0, 0, Math.PI * 2);
+      ctx.ellipse(bodyRX * 0.18, cy - bodyRY * 0.25, bodyRX * 0.12, bodyRY * 0.18, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // === ENEMY SPRITE (procedural) ===
+    function drawEnemy(ctx, enemy, theme) {
+      var cx = enemy.x + enemy.width / 2;
+      var cy = enemy.y + enemy.height / 2;
+      var rx = enemy.width / 2;
+      var ry = enemy.height / 2;
+
+      // Wings
+      ctx.fillStyle = theme.enemyAccent;
+      ctx.beginPath();
+      ctx.moveTo(cx - rx, cy);
+      ctx.lineTo(cx - rx * 1.6, cy - ry * 0.6);
+      ctx.lineTo(cx - rx * 0.6, cy + ry * 0.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx + rx, cy);
+      ctx.lineTo(cx + rx * 1.6, cy - ry * 0.6);
+      ctx.lineTo(cx + rx * 0.6, cy + ry * 0.2);
+      ctx.closePath();
+      ctx.fill();
+
+      // Body
+      ctx.fillStyle = theme.enemyColor;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eyes (angry)
+      ctx.fillStyle = '#1a1a1a';
+      ctx.beginPath();
+      ctx.ellipse(cx - rx * 0.3, cy - ry * 0.1, rx * 0.14, ry * 0.18, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx + rx * 0.3, cy - ry * 0.1, rx * 0.14, ry * 0.18, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eyebrows (angry slant)
+      ctx.strokeStyle = theme.enemyAccent;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - rx * 0.5, cy - ry * 0.45);
+      ctx.lineTo(cx - rx * 0.15, cy - ry * 0.3);
+      ctx.moveTo(cx + rx * 0.5, cy - ry * 0.45);
+      ctx.lineTo(cx + rx * 0.15, cy - ry * 0.3);
+      ctx.stroke();
+    }
+
+    function drawEnemySprite(ctx, enemy, world, theme) {
+      var key = world === 'island' ? 'enemyIsland' : 'enemyGhost';
+      if (spriteReady(key)) {
+        ctx.drawImage(sprites[key], enemy.x, enemy.y, enemy.width, enemy.height);
+      } else {
+        drawEnemy(ctx, enemy, theme);
+      }
+    }
+
+    // === GHOST MUSHROOM POWERUP SPRITE (procedural fallback) ===
+    function drawGhostMushroom(ctx, p) {
+      var cx = p.x + p.width / 2;
+      var cy = p.y + p.height / 2;
+      var rx = p.width / 2;
+      var ry = p.height / 2;
+
+      // Cap (ghost-white mushroom top)
+      ctx.fillStyle = '#F5F3FF';
+      ctx.beginPath();
+      ctx.arc(cx, cy - ry * 0.1, rx * 0.9, Math.PI, 0, false);
+      ctx.fill();
+      // Stem/skirt
+      ctx.fillStyle = '#E0DAF5';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + ry * 0.35, rx * 0.55, ry * 0.45, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Eye holes (ghost face)
+      ctx.fillStyle = '#4527A0';
+      ctx.beginPath();
+      ctx.ellipse(cx - rx * 0.28, cy - ry * 0.1, rx * 0.13, ry * 0.18, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx + rx * 0.28, cy - ry * 0.1, rx * 0.13, ry * 0.18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#B39DDB';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy - ry * 0.1, rx * 0.9, Math.PI, 0, false);
+      ctx.stroke();
+    }
+
+    function drawPowerupSprite(ctx, p) {
+      if (spriteReady('ghostMushroom')) {
+        ctx.drawImage(sprites.ghostMushroom, p.x, p.y, p.width, p.height);
+      } else {
+        drawGhostMushroom(ctx, p);
+      }
+    }
+
+    // === FIREBALL & EFFECT SPRITES (procedural) ===
+    function drawFireball(ctx, fb) {
+      var cfg = CONFIG.fireball;
+      var r = cfg.size / 2;
+      if (spriteReady('fireball')) {
+        ctx.drawImage(sprites.fireball, fb.x - r, fb.y - r, cfg.size, cfg.size);
+        return;
+      }
+      ctx.save();
+      ctx.fillStyle = cfg.color;
+      ctx.beginPath();
+      ctx.arc(fb.x, fb.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = cfg.coreColor;
+      ctx.beginPath();
+      ctx.arc(fb.x, fb.y, r * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = cfg.outlineColor;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(fb.x, fb.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawDefeatEffect(ctx, fx) {
+      var t = Math.max(0, fx.timer / CONFIG.fireball.defeatEffectDuration);
+      ctx.save();
+      ctx.globalAlpha = t;
+      ctx.strokeStyle = CONFIG.fireball.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(fx.x, fx.y, (1 - t) * 24 + 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
 
     // === RENDERER ===
@@ -479,27 +991,68 @@
       }
 
       // --- 1. Sky background ---
-      ctx.fillStyle = '#87CEEB';
+      var theme = getWorldTheme(gameState.world);
+      var skyGrad = ctx.createLinearGradient(0, 0, 0, groundY);
+      skyGrad.addColorStop(0, theme.skyTop);
+      skyGrad.addColorStop(1, theme.skyBottom);
+      ctx.fillStyle = skyGrad;
       ctx.fillRect(0, 0, w, h);
 
-      // --- 2. Clouds (semi-transparent ellipses) ---
+      // --- 1b. World background decoration (hills / haunted manor) ---
+      if (gameState.world === 'island') {
+        if (spriteReady('hillIsland')) {
+          var hillImg = sprites.hillIsland;
+          var hillW = w * 1.15;
+          var hillH = hillW * (hillImg.height / hillImg.width);
+          ctx.drawImage(hillImg, (w - hillW) / 2, groundY - hillH + 36, hillW, hillH);
+        } else {
+          ctx.fillStyle = theme.hillColorDark;
+          ctx.beginPath();
+          ctx.ellipse(w * 0.2, groundY + 15, 165, 90, 0, Math.PI, 0, false);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.ellipse(w * 0.78, groundY + 23, 210, 105, 0, Math.PI, 0, false);
+          ctx.fill();
+          ctx.fillStyle = theme.hillColor;
+          ctx.beginPath();
+          ctx.ellipse(w * 0.48, groundY + 15, 195, 98, 0, Math.PI, 0, false);
+          ctx.fill();
+        }
+      } else if (gameState.world === 'ghost' && spriteReady('manorGhost')) {
+        var manorImg = sprites.manorGhost;
+        var manorW = w * 0.95;
+        var manorH = manorW * (manorImg.height / manorImg.width);
+        ctx.globalAlpha = 0.9;
+        ctx.drawImage(manorImg, (w - manorW) / 2, groundY - manorH + 24, manorW, manorH);
+        ctx.globalAlpha = 1.0;
+      }
+
+      // --- 2. Clouds ---
+      var cloudKey = gameState.world === 'island' ? 'cloudIsland' : 'cloudGhost';
+      var cloudSpriteReady = spriteReady(cloudKey);
       for (var i = 0; i < gameState.clouds.length; i++) {
         var cloud = gameState.clouds[i];
         ctx.globalAlpha = cloud.opacity;
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.ellipse(
-          cloud.x + cloud.width / 2,
-          cloud.y + cloud.height / 2,
-          cloud.width / 2,
-          cloud.height / 2,
-          0, 0, Math.PI * 2
-        );
-        ctx.fill();
+        if (cloudSpriteReady) {
+          ctx.drawImage(sprites[cloudKey], cloud.x, cloud.y, cloud.width, cloud.height);
+        } else {
+          ctx.fillStyle = theme.cloudColor;
+          ctx.beginPath();
+          ctx.ellipse(
+            cloud.x + cloud.width / 2,
+            cloud.y + cloud.height / 2,
+            cloud.width / 2,
+            cloud.height / 2,
+            0, 0, Math.PI * 2
+          );
+          ctx.fill();
+        }
       }
       ctx.globalAlpha = 1.0;
 
-      // --- 3. Pipes (two-tone green with caps, with holes) ---
+      // --- 3. Pipes (textured column sprite with procedural caps, with holes) ---
+      var pipeKey = gameState.world === 'island' ? 'pipeIsland' : 'pipeGhost';
+      var pipePattern = getPipePattern(ctx, pipeKey);
       for (var i = 0; i < gameState.pipes.length; i++) {
         var pipe = gameState.pipes[i];
         var topH = pipe.gapY - pipe.gapSize / 2;
@@ -508,25 +1061,29 @@
         var capOverhang = CONFIG.pipe.capOverhang;
 
         // Top pipe body
-        ctx.fillStyle = CONFIG.pipe.bodyColor;
+        ctx.fillStyle = pipePattern || theme.pipeBody;
         ctx.fillRect(pipe.x, 0, pipe.width, topH);
-        ctx.fillStyle = CONFIG.pipe.highlightColor;
-        ctx.fillRect(pipe.x, 0, 3, topH);
-        ctx.fillStyle = CONFIG.pipe.capColor;
+        if (!pipePattern) {
+          ctx.fillStyle = theme.pipeHighlight;
+          ctx.fillRect(pipe.x, 0, 3, topH);
+        }
+        ctx.fillStyle = theme.pipeCap;
         ctx.fillRect(pipe.x - capOverhang, topH - capH, pipe.width + capOverhang * 2, capH);
-        ctx.strokeStyle = CONFIG.pipe.outlineColor;
+        ctx.strokeStyle = theme.pipeOutline;
         ctx.lineWidth = 1;
         ctx.strokeRect(pipe.x, 0, pipe.width, topH);
         ctx.strokeRect(pipe.x - capOverhang, topH - capH, pipe.width + capOverhang * 2, capH);
 
         // Bottom pipe body
-        ctx.fillStyle = CONFIG.pipe.bodyColor;
+        ctx.fillStyle = pipePattern || theme.pipeBody;
         ctx.fillRect(pipe.x, bottomY, pipe.width, groundY - bottomY);
-        ctx.fillStyle = CONFIG.pipe.highlightColor;
-        ctx.fillRect(pipe.x, bottomY, 3, groundY - bottomY);
-        ctx.fillStyle = CONFIG.pipe.capColor;
+        if (!pipePattern) {
+          ctx.fillStyle = theme.pipeHighlight;
+          ctx.fillRect(pipe.x, bottomY, 3, groundY - bottomY);
+        }
+        ctx.fillStyle = theme.pipeCap;
         ctx.fillRect(pipe.x - capOverhang, bottomY, pipe.width + capOverhang * 2, capH);
-        ctx.strokeStyle = CONFIG.pipe.outlineColor;
+        ctx.strokeStyle = theme.pipeOutline;
         ctx.lineWidth = 1;
         ctx.strokeRect(pipe.x, bottomY, pipe.width, groundY - bottomY);
         ctx.strokeRect(pipe.x - capOverhang, bottomY, pipe.width + capOverhang * 2, capH);
@@ -592,11 +1149,21 @@
         }
       }
 
+      // --- 3c. Enemies ---
+      for (var i = 0; i < gameState.enemies.length; i++) {
+        drawEnemySprite(ctx, gameState.enemies[i], gameState.world, theme);
+      }
+
+      // --- 3d. Ghost Mushroom powerups ---
+      for (var i = 0; i < gameState.powerups.length; i++) {
+        drawPowerupSprite(ctx, gameState.powerups[i]);
+      }
+
       // --- 4. Ground ---
-      ctx.fillStyle = '#2c3e50';
+      ctx.fillStyle = theme.groundColor;
       ctx.fillRect(0, groundY, w, CONFIG.ground.height);
       // Subtle top edge line
-      ctx.strokeStyle = '#1a252f';
+      ctx.strokeStyle = theme.groundLine;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(0, groundY);
@@ -609,29 +1176,20 @@
       var centerY = kiro.y + kiro.height / 2;
       // Velocity-based tilt
       var targetAngle = Math.max(-0.5, Math.min(0.8, kiro.velocity * 0.002));
+      var isPhasing = gameState.ghostPhaseTimer > 0;
       ctx.save();
       ctx.translate(centerX, centerY);
       ctx.rotate(targetAngle);
-      if (assets.kiroImg && assets.kiroImg.complete && assets.kiroImg.naturalWidth > 0) {
-        ctx.drawImage(assets.kiroImg, -kiro.width / 2, -kiro.height / 2, kiro.width, kiro.height);
+      if (isPhasing) {
+        // Pulsing translucency + violet glow to signal wall-phasing is active
+        ctx.globalAlpha = 0.5 + 0.25 * Math.sin(gameState.elapsed * 10);
+        ctx.shadowColor = '#9C64F2';
+        ctx.shadowBlur = 18;
+      }
+      if (spriteReady('yoshiGhost')) {
+        ctx.drawImage(sprites.yoshiGhost, -kiro.width / 2, -kiro.height / 2, kiro.width, kiro.height);
       } else {
-        // Fallback: white rounded rectangle
-        ctx.fillStyle = '#ffffff';
-        var rx = -kiro.width / 2;
-        var ry = -kiro.height / 2;
-        var radius = 8;
-        ctx.beginPath();
-        ctx.moveTo(rx + radius, ry);
-        ctx.lineTo(rx + kiro.width - radius, ry);
-        ctx.quadraticCurveTo(rx + kiro.width, ry, rx + kiro.width, ry + radius);
-        ctx.lineTo(rx + kiro.width, ry + kiro.height - radius);
-        ctx.quadraticCurveTo(rx + kiro.width, ry + kiro.height, rx + kiro.width - radius, ry + kiro.height);
-        ctx.lineTo(rx + radius, ry + kiro.height);
-        ctx.quadraticCurveTo(rx, ry + kiro.height, rx, ry + kiro.height - radius);
-        ctx.lineTo(rx, ry + radius);
-        ctx.quadraticCurveTo(rx, ry, rx + radius, ry);
-        ctx.closePath();
-        ctx.fill();
+        drawYoshiGhost(ctx, kiro.width, kiro.height);
       }
       ctx.restore();
 
@@ -650,6 +1208,16 @@
         ctx.restore();
       }
 
+      // --- 5c. Fireballs ---
+      for (var i = 0; i < gameState.fireballs.length; i++) {
+        drawFireball(ctx, gameState.fireballs[i]);
+      }
+
+      // --- 5d. Enemy defeat effects ---
+      for (var i = 0; i < gameState.defeatEffects.length; i++) {
+        drawDefeatEffect(ctx, gameState.defeatEffects[i]);
+      }
+
       // --- 6. HUD score text ---
       var scoreScale = 1.0;
       if (gameState.scoreAnimTimer > 0) {
@@ -658,7 +1226,7 @@
         scoreScale = 1.0 + 0.3 * t;
       }
       ctx.save();
-      ctx.font = '18px monospace';
+      ctx.font = '27px monospace';
       ctx.fillStyle = '#ffffff';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -673,29 +1241,80 @@
       if (gameState.impossibleTimer > 0 && gameState.status === 'playing') {
         var timeLeft = Math.ceil(gameState.impossibleTimer);
         ctx.save();
-        ctx.font = 'bold 24px monospace';
+        ctx.font = 'bold 36px monospace';
         ctx.fillStyle = CONFIG.impossible.gateColor;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
-        ctx.fillText('IMPOSSIBLE: ' + timeLeft + 's', 12, 12);
+        ctx.fillText('IMPOSSIBLE: ' + timeLeft + 's', 18, 18);
         ctx.restore();
       }
 
       // --- 6c. Laser recharge timer (bottom-left) ---
       if (gameState.status === 'playing') {
         ctx.save();
-        ctx.font = '16px monospace';
+        ctx.font = '24px monospace';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'bottom';
-        var laserY = groundY - 8;
+        var laserY = groundY - 12;
         if (gameState.laserReady) {
           ctx.fillStyle = CONFIG.laser.beamColor;
-          ctx.fillText('LASER: READY [L]', 12, laserY);
+          ctx.fillText('LASER: READY [L]', 18, laserY);
         } else {
           var rechargeLeft = Math.ceil(gameState.laserRechargeTimer);
           ctx.fillStyle = '#999999';
-          ctx.fillText('LASER: ' + rechargeLeft + 's', 12, laserY);
+          ctx.fillText('LASER: ' + rechargeLeft + 's', 18, laserY);
         }
+        ctx.restore();
+      }
+
+      // --- 6d. Fireball cooldown indicator ---
+      if (gameState.status === 'playing') {
+        ctx.save();
+        ctx.font = '24px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        var fireY = groundY - 42;
+        if (gameState.fireballCooldown <= 0) {
+          ctx.fillStyle = CONFIG.fireball.color;
+          ctx.fillText('FIRE: READY [F]', 18, fireY);
+        } else {
+          ctx.fillStyle = '#999999';
+          ctx.fillText('FIRE: ' + gameState.fireballCooldown.toFixed(1) + 's', 18, fireY);
+        }
+        ctx.restore();
+      }
+
+      // --- 6e. Ghost Mushroom phase timer ---
+      if (gameState.status === 'playing' && gameState.ghostPhaseTimer > 0) {
+        ctx.save();
+        ctx.font = '24px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillStyle = '#B388FF';
+        ctx.fillText('GHOST MODE: ' + gameState.ghostPhaseTimer.toFixed(1) + 's', 18, groundY - 72);
+        ctx.restore();
+      }
+
+      // --- 6f. World label ---
+      if (gameState.status === 'playing' || gameState.status === 'start') {
+        ctx.save();
+        ctx.font = 'bold 21px monospace';
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'top';
+        ctx.fillText(theme.label, w - 18, 18);
+        ctx.restore();
+      }
+
+      // --- 6g. World transition banner ---
+      if (gameState.worldTransitionTimer > 0 && gameState.status === 'playing') {
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, gameState.worldTransitionTimer / 0.4);
+        ctx.font = 'bold 30px monospace';
+        ctx.fillStyle = '#FFEE58';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(gameState.worldTransitionText, w / 2, 105);
         ctx.restore();
       }
 
@@ -704,12 +1323,15 @@
         // Pulsing "Tap or Press Space to Start"
         var pulse = 0.75 + 0.25 * Math.sin(Date.now() * 0.003 * 3);
         ctx.globalAlpha = pulse;
-        ctx.font = '22px monospace';
+        ctx.font = '33px monospace';
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('Tap or Press Space to Start', w / 2, h / 2 - 60);
+        ctx.fillText('Tap or Press Space to Start', w / 2, h / 2 - 90);
         ctx.globalAlpha = 1.0;
+        ctx.font = '20px monospace';
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.fillText('F: Spit Fireball   L: Laser', w / 2, h / 2 - 45);
       }
 
       if (gameState.status === 'gameOver') {
@@ -720,17 +1342,17 @@
         ctx.globalAlpha = 1.0;
 
         // "Game Over" text
-        ctx.font = 'bold 36px monospace';
+        ctx.font = 'bold 54px monospace';
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('Game Over', w / 2, h / 2 - 30);
+        ctx.fillText('Game Over', w / 2, h / 2 - 45);
 
         // Restart prompt with pulsing opacity
         var restartPulse = 0.75 + 0.25 * Math.sin(Date.now() * 0.003 * 3);
         ctx.globalAlpha = restartPulse;
-        ctx.font = '18px monospace';
-        ctx.fillText('Tap or Press Space to Restart', w / 2, h / 2 + 20);
+        ctx.font = '27px monospace';
+        ctx.fillText('Tap or Press Space to Restart', w / 2, h / 2 + 30);
         ctx.globalAlpha = 1.0;
       }
 
@@ -750,6 +1372,7 @@
       var rawDt = (timestamp - lastTimestamp) / 1000;
       var dt = Math.min(rawDt, 0.05);
       lastTimestamp = timestamp;
+      gameState.elapsed += dt;
 
       // 1. Process queued jump
       if (gameState.jumpQueued) {
@@ -763,8 +1386,10 @@
       // 3. Spawn pipes (and occasionally gates) based on distance traveled
       gameState.distanceSinceLastSpawn += CONFIG.pipe.speed * dt;
       if (gameState.distanceSinceLastSpawn >= CONFIG.wall.spacing) {
-        // Chance to spawn a red gate instead of a pipe (only if impossible mode not active)
-        if (!gameState.gravityReversed && gameState.impossibleTimer <= 0 && Math.random() < CONFIG.impossible.spawnChance) {
+        // Chance to spawn a red gate instead of a pipe (only if impossible mode isn't
+        // active AND no earlier gate is still waiting to be crossed — otherwise crossing
+        // two gates back-to-back re-triggers/resets the IMPOSSIBLE timer unexpectedly).
+        if (!gameState.gravityReversed && gameState.impossibleTimer <= 0 && !hasPendingGate(gameState.gates) && Math.random() < CONFIG.impossible.spawnChance) {
           gameState.gates.push(spawnGate());
         } else {
           gameState.pipes.push(spawnPipe());
@@ -772,18 +1397,49 @@
         gameState.distanceSinceLastSpawn -= CONFIG.wall.spacing;
       }
 
+      // 3b. Spawn enemies based on distance traveled
+      gameState.distanceSinceLastEnemy += CONFIG.pipe.speed * dt;
+      if (gameState.distanceSinceLastEnemy >= CONFIG.enemy.spawnDistance) {
+        gameState.enemies.push(spawnEnemy());
+        gameState.distanceSinceLastEnemy -= CONFIG.enemy.spawnDistance;
+      }
+
+      // 3c. Spawn Ghost Mushroom powerups based on distance traveled
+      gameState.distanceSinceLastPowerup += CONFIG.pipe.speed * dt;
+      if (gameState.distanceSinceLastPowerup >= CONFIG.powerup.spawnDistance) {
+        gameState.powerups.push(spawnPowerup());
+        gameState.distanceSinceLastPowerup -= CONFIG.powerup.spawnDistance;
+      }
+
       // 4. Update pipes and gates
       updatePipes(gameState.pipes, dt);
       updateGates(gameState.gates, dt);
 
+      // 4b. Update enemies
+      updateEnemies(gameState.enemies, dt, gameState.elapsed);
+
+      // 4c. Update powerups
+      updatePowerups(gameState.powerups, dt, gameState.elapsed);
+
       // 5. Update clouds
       updateClouds(gameState.clouds, dt);
 
-      // 6. Check collisions (pipes + gates)
-      if (checkCollision(gameState.kiro, gameState.pipes, gameState.gates)) {
+      // 5b. Ghost Mushroom pickup grants temporary wall-phasing
+      var pickedPowerupIdx = checkPowerupCollision(gameState.kiro, gameState.powerups);
+      if (pickedPowerupIdx !== -1) {
+        gameState.powerups.splice(pickedPowerupIdx, 1);
+        gameState.ghostPhaseTimer = CONFIG.powerup.duration;
+      }
+      if (gameState.ghostPhaseTimer > 0) {
+        gameState.ghostPhaseTimer -= dt;
+        if (gameState.ghostPhaseTimer < 0) gameState.ghostPhaseTimer = 0;
+      }
+
+      // 6. Check collisions (pipes + gates, skipped while phasing; enemies always active)
+      if (checkCollision(gameState.kiro, gameState.pipes, gameState.gates, gameState.ghostPhaseTimer > 0) || checkEnemyCollision(gameState.kiro, gameState.enemies)) {
         gameState.status = 'gameOver';
         gameOverTime = Date.now();
-        playSound(assets.gameOverSound);
+        playSound(assets.yoshiDeathSound);
         saveHighScore(gameState.highScore);
         gameState.shakeTimer = CONFIG.shake.duration;
         cancelAnimationFrame(rafId);
@@ -830,6 +1486,27 @@
       // 8b. Update laser
       updateLaser(gameState, dt);
 
+      // 8c. Update fireball cooldown, projectiles, and collisions with enemies
+      if (gameState.fireballCooldown > 0) {
+        gameState.fireballCooldown -= dt;
+        if (gameState.fireballCooldown < 0) gameState.fireballCooldown = 0;
+      }
+      updateFireballs(gameState.fireballs, dt);
+      updateFireballCollisions(gameState);
+      updateDefeatEffects(gameState.defeatEffects, dt);
+
+      // 8d. World switch (alternates Ghost Manor / Yoshi Island by score)
+      var newWorld = worldForScore(gameState.score);
+      if (newWorld !== gameState.world) {
+        gameState.world = newWorld;
+        gameState.worldTransitionTimer = 2.0;
+        gameState.worldTransitionText = newWorld === 'island' ? 'ENTERING YOSHI ISLAND!' : 'BACK TO GHOST MANOR!';
+      }
+      if (gameState.worldTransitionTimer > 0) {
+        gameState.worldTransitionTimer -= dt;
+        if (gameState.worldTransitionTimer < 0) gameState.worldTransitionTimer = 0;
+      }
+
       // 9. Update score anim timer
       if (gameState.scoreAnimTimer > 0) {
         gameState.scoreAnimTimer -= dt * 5;
@@ -856,7 +1533,7 @@
 
       // Idle bob for Kiro (sine wave)
       if (gameState.status === 'start') {
-        gameState.kiro.y = kiroBaseY + Math.sin(idleElapsed * 2) * 5;
+        gameState.kiro.y = kiroBaseY + Math.sin(idleElapsed * 2) * 7.5;
       }
 
       // Update shake timer during game over
@@ -879,6 +1556,13 @@
         return;
       }
 
+      // Fireball spit on F key
+      if (e.type === 'keydown' && e.code === 'KeyF') {
+        e.preventDefault();
+        fireFireball(gameState);
+        return;
+      }
+
       if (e.type === 'keydown' && e.code !== 'Space') return;
       if (e.code === 'Space') e.preventDefault();
       if (e.type === 'touchstart') e.preventDefault();
@@ -887,6 +1571,7 @@
         resetGame(gameState);
         lastTimestamp = performance.now();
         gameState.distanceSinceLastSpawn = 0;
+        playSound(assets.yoshiStartSound);
         if (rafId) cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(gameLoop);
       } else if (gameState.status === 'playing') {
@@ -898,6 +1583,7 @@
         resetGame(gameState);
         lastTimestamp = performance.now();
         gameState.distanceSinceLastSpawn = 0;
+        playSound(assets.yoshiStartSound);
         if (rafId) cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(gameLoop);
       }
